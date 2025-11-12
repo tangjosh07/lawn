@@ -405,45 +405,63 @@ function joinGroup(groupId) {
 }
 
 // Handle join form submit
-function handleJoinGroup(e) {
+async function handleJoinGroup(e) {
   e.preventDefault();
   
-  const name = document.getElementById('joinName').value.trim();
-  const email = document.getElementById('joinEmail').value.trim();
-  
-  // Validation
-  if (name.length < 2) {
-    showToast('Name must be at least 2 characters', 'error');
+  if (!currentUser) {
+    showToast('Please sign in to join a group', 'error');
+    handleGoogleLogin();
     return;
   }
   
-  if (!email.includes('@')) {
-    showToast('Please enter a valid email address', 'error');
-    return;
-  }
-  
-  // Find group and update members (optimistic UI)
-  const group = groups.find(g => g.id === currentGroupId);
-  if (group) {
-    group.members += 1;
+  try {
+    const response = await fetch(`/api/groups/${currentGroupId}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userId: currentUser.id
+      })
+    });
     
-    // Show success
-    showToast(`Joined ${group.name}! (demo)`, 'success');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to join group');
+    }
     
-    // Re-render
-    renderGroups();
+    const updatedGroup = await response.json();
     
-    // Close modal
+    // Update local groups array
+    const groupIndex = groups.findIndex(g => g.id === currentGroupId);
+    if (groupIndex !== -1) {
+      groups[groupIndex] = {
+        id: updatedGroup.id,
+        name: updatedGroup.name,
+        zip: updatedGroup.zip,
+        members: updatedGroup.members
+      };
+    }
+    
     closeModal(joinModal);
-    
-    // Reset form
     joinForm.reset();
+    renderGroups();
+    showToast(`Joined ${updatedGroup.name}!`, 'success');
+  } catch (error) {
+    console.error('Error joining group:', error);
+    showToast(error.message || 'Failed to join group', 'error');
   }
 }
 
 // Handle start group form submit
-function handleStartGroup(e) {
+async function handleStartGroup(e) {
   e.preventDefault();
+  
+  if (!currentUser) {
+    showToast('Please sign in to start a group', 'error');
+    handleGoogleLogin();
+    return;
+  }
   
   const name = document.getElementById('groupName').value.trim();
   const zip = document.getElementById('groupZip').value.trim();
@@ -459,34 +477,56 @@ function handleStartGroup(e) {
     return;
   }
   
-  // Create new group (optimistic UI)
-  const newGroup = {
-    id: Date.now().toString(),
-    name: name,
-    zip: zip,
-    members: 1
-  };
-  
-  groups.push(newGroup);
-  
-  // Show success
-  showToast(`Created ${name}! (demo)`, 'success');
-  
-  // Update ZIP filter if needed
-  if (!currentZip || currentZip === zip) {
-    currentZip = zip;
-    zipInput.value = zip;
-    zipLabel.textContent = zip;
+  try {
+    const response = await fetch('/api/groups', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: name,
+        zip: zip,
+        creatorId: currentUser.id
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create group');
+    }
+    
+    const newGroup = await response.json();
+    
+    // Add to local groups array
+    groups.push({
+      id: newGroup.id,
+      name: newGroup.name,
+      zip: newGroup.zip,
+      members: newGroup.members
+    });
+    
+    // Update ZIP filter if needed
+    if (!currentZip || currentZip === zip) {
+      currentZip = zip;
+      zipInput.value = zip;
+      zipLabel.textContent = zip;
+    }
+    
+    // Re-render
+    renderGroups();
+    
+    // Close modal
+    closeModal(startGroupModal);
+    
+    // Reset form
+    startGroupForm.reset();
+    
+    // Show success
+    showToast(`Created ${name}!`, 'success');
+  } catch (error) {
+    console.error('Error creating group:', error);
+    showToast(error.message || 'Failed to create group', 'error');
   }
-  
-  // Re-render
-  renderGroups();
-  
-  // Close modal
-  closeModal(startGroupModal);
-  
-  // Reset form
-  startGroupForm.reset();
 }
 
 // Show loading state
