@@ -102,15 +102,18 @@ const ensureDB = async () => {
 
 // Helper functions - use database or fallback to in-memory
 const findUser = async (userId) => {
+  // First try database
   if (await ensureDB()) {
     try {
-      return await User.findById(userId);
+      const user = await User.findById(userId);
+      if (user) return user;
     } catch (error) {
-      console.error('Error finding user:', error);
-      return null;
+      console.error('Error finding user in database:', error);
     }
   }
-  return null;
+  
+  // Fallback to in-memory storage
+  return inMemoryUsers.find(u => u.id === userId || u._id?.toString() === userId) || null;
 };
 
 const findUserByEmail = async (email) => {
@@ -395,7 +398,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
     }
     
     if (!user) {
-      // Create new user
+      // Create new user - ALWAYS try database first
+      console.log('Creating new user in database...');
       if (await ensureDB()) {
         try {
           user = new User({
@@ -407,35 +411,37 @@ app.get('/api/auth/google/callback', async (req, res) => {
             authMethod: 'google'
           });
           await user.save();
-          // Convert to plain object for response
-          user = {
-            _id: user._id,
-            id: user._id.toString(),
-            name: user.name,
-            email: user.email,
-            googleId: user.googleId,
-            picture: user.picture,
-            userType: user.userType
-          };
+          console.log('✅ User saved to database:', user._id.toString());
         } catch (error) {
-          console.error('Error creating user in database:', error);
-          // Fall back to in-memory storage
-          console.warn('Falling back to in-memory user storage');
-          const userId = uuidv4();
-          user = {
-            id: userId,
-            name: name || email.split('@')[0],
-            email: normalizedEmail,
-            googleId: googleId,
-            picture: picture,
-            userType: session.userType || 'homeowner',
-            authMethod: 'google'
-          };
-          inMemoryUsers.push(user);
+          console.error('❌ Error creating user in database:', error);
+          // If it's a duplicate key error, try to find the user
+          if (error.code === 11000) {
+            console.log('User already exists, finding by email...');
+            user = await User.findOne({ email: normalizedEmail });
+            if (!user) {
+              user = await User.findOne({ googleId });
+            }
+          }
+          
+          // If still no user, fall back to in-memory
+          if (!user) {
+            console.warn('⚠️ Falling back to in-memory user storage');
+            const userId = uuidv4();
+            user = {
+              id: userId,
+              name: name || email.split('@')[0],
+              email: normalizedEmail,
+              googleId: googleId,
+              picture: picture,
+              userType: session.userType || 'homeowner',
+              authMethod: 'google'
+            };
+            inMemoryUsers.push(user);
+          }
         }
       } else {
         // Database not available - use in-memory storage
-        console.warn('Database not available - using in-memory storage');
+        console.warn('⚠️ Database not available - using in-memory storage');
         const userId = uuidv4();
         user = {
           id: userId,
@@ -450,7 +456,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
       }
     } else {
       // Update existing user with Google info if needed
-      if (await ensureDB() && user.save) {
+      if (await ensureDB() && user.save && typeof user.save === 'function') {
         try {
           if (!user.googleId) {
             user.googleId = googleId;
@@ -460,24 +466,36 @@ app.get('/api/auth/google/callback', async (req, res) => {
           }
           user.authMethod = 'google';
           await user.save();
+          console.log('✅ User updated in database');
         } catch (error) {
           console.error('Error updating user in database:', error);
           // Continue anyway - user exists, just couldn't update
         }
       }
-      
-      // Convert Mongoose document to plain object if needed
-      if (user._id && typeof user._id.toString === 'function') {
-        user = {
-          id: user._id.toString(),
-          name: user.name,
-          email: user.email,
-          googleId: user.googleId,
-          picture: user.picture,
-          userType: user.userType
-        };
-      }
     }
+    
+    // Convert Mongoose document to plain object for response
+    let userResponse = user;
+    if (user._id && typeof user._id.toString === 'function') {
+      userResponse = {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        googleId: user.googleId,
+        picture: user.picture,
+        userType: user.userType
+      };
+    } else if (!user.id && user._id) {
+      userResponse = {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        googleId: user.googleId,
+        picture: user.picture,
+        userType: user.userType
+      };
+    }
+    user = userResponse;
     
     // Clean up session
     delete sessions[state];
@@ -573,35 +591,81 @@ app.post('/api/groups', async (req, res) => {
       return res.status(400).json({ error: 'ZIP code is required' });
     }
     
-    // Verify creator exists
-    const creator = await findUser(creatorId);
+    // Verify creator exists - check both database and in-memory
+    let creator = await findUser(creatorId);
+    
     if (!creator) {
-      return res.status(404).json({ error: 'Creator not found' });
+      console.error('Creator not found for ID:', creatorId);
+      console.log('Available users in memory:', inMemoryUsers.length);
+      return res.status(404).json({ error: 'Creator not found. Please sign in again.' });
     }
     
-    const group = new Group({
-      name,
-      address: address || '',
-      zip: groupZip,
-      createdBy: creatorId,
-      members: [creatorId] // Creator is first member
-    });
+    // If creator is in-memory, we need to save them to database first
+    if (!creator._id && creator.id) {
+      console.log('Creator is in-memory, saving to database first...');
+      if (await ensureDB()) {
+        try {
+          const dbUser = new User({
+            name: creator.name,
+            email: creator.email,
+            googleId: creator.googleId,
+            picture: creator.picture,
+            userType: creator.userType || 'homeowner',
+            authMethod: creator.authMethod || 'google'
+          });
+          await dbUser.save();
+          creator = dbUser;
+          console.log('✅ Creator saved to database:', creator._id.toString());
+        } catch (error) {
+          console.error('Error saving creator to database:', error);
+          // If duplicate, find existing user
+          if (error.code === 11000) {
+            creator = await User.findOne({ email: creator.email }) || 
+                     await User.findOne({ googleId: creator.googleId });
+          }
+          if (!creator || !creator._id) {
+            return res.status(500).json({ error: 'Failed to save creator to database' });
+          }
+        }
+      } else {
+        return res.status(503).json({ error: 'Database unavailable. Cannot create group without database.' });
+      }
+    }
     
-    await group.save();
-    await group.populate('members', 'name email picture');
-    await group.populate('createdBy', 'name email');
+    // Ensure we have a MongoDB ObjectId for the creator
+    const creatorObjectId = creator._id || creator.id;
+    if (!creatorObjectId) {
+      return res.status(500).json({ error: 'Invalid creator ID' });
+    }
     
-    res.json({
-      id: group._id.toString(),
-      name: group.name,
-      zip: group.zip,
-      address: group.address,
-      members: group.members ? group.members.length : 1,
-      memberDetails: group.members || []
-    });
+    // Create group in database
+    if (await ensureDB()) {
+      const group = new Group({
+        name,
+        address: address || '',
+        zip: groupZip,
+        createdBy: creatorObjectId,
+        members: [creatorObjectId] // Creator is first member
+      });
+      
+      await group.save();
+      await group.populate('members', 'name email picture');
+      await group.populate('createdBy', 'name email');
+      
+      res.json({
+        id: group._id.toString(),
+        name: group.name,
+        zip: group.zip,
+        address: group.address,
+        members: group.members ? group.members.length : 1,
+        memberDetails: group.members || []
+      });
+    } else {
+      return res.status(503).json({ error: 'Database unavailable. Cannot create group without database.' });
+    }
   } catch (error) {
     console.error('Error creating group:', error);
-    res.status(500).json({ error: 'Failed to create group' });
+    res.status(500).json({ error: 'Failed to create group: ' + error.message });
   }
 });
 
