@@ -31,12 +31,16 @@ app.use('/assets', express.static(assetsPath));
 app.get('/', (req, res) => {
   try {
     const indexPath = path.join(projectRoot, 'index.html');
+    console.log('Serving index.html from:', indexPath);
+    console.log('Project root:', projectRoot);
+    console.log('__dirname:', __dirname);
+    console.log('process.cwd():', process.cwd());
     res.sendFile(indexPath);
   } catch (error) {
     console.error('Error serving index.html:', error);
     console.error('Project root:', projectRoot);
     console.error('__dirname:', __dirname);
-    res.status(500).send('Error loading page');
+    res.status(500).send('Error loading page: ' + error.message);
   }
 });
 
