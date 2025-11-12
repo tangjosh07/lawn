@@ -9,14 +9,23 @@ const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server);
+// Only create server and socket.io if not in Vercel (serverless)
+let server, io;
+if (!process.env.VERCEL) {
+  server = http.createServer(app);
+  io = socketIo(server);
+}
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname)));
 
-// Serve static assets
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
+// Serve static files (only in Vercel, local dev uses express.static)
+if (process.env.VERCEL) {
+  app.use(express.static(path.join(__dirname)));
+  app.use('/assets', express.static(path.join(__dirname, 'assets')));
+} else {
+  app.use(express.static(path.join(__dirname)));
+  app.use('/assets', express.static(path.join(__dirname, 'assets')));
+}
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
@@ -373,37 +382,45 @@ app.get('/api/messages/:userId/:otherUserId', (req, res) => {
   res.json(messages);
 });
 
-// Socket.io for real-time chat
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
-  
-  socket.on('join-room', (userId) => {
-    socket.join(`user-${userId}`);
-  });
-  
-  socket.on('send-message', (messageData) => {
-    const message = {
-      id: uuidv4(),
-      fromId: messageData.fromId,
-      toId: messageData.toId,
-      content: messageData.content,
-      createdAt: new Date().toISOString()
-    };
+// Socket.io for real-time chat (only if not in Vercel)
+if (io) {
+  io.on('connection', (socket) => {
+    console.log('User connected:', socket.id);
     
-    data.messages.push(message);
+    socket.on('join-room', (userId) => {
+      socket.join(`user-${userId}`);
+    });
     
-    // Send to both users
-    io.to(`user-${messageData.toId}`).emit('receive-message', message);
-    io.to(`user-${messageData.fromId}`).emit('receive-message', message);
+    socket.on('send-message', (messageData) => {
+      const message = {
+        id: uuidv4(),
+        fromId: messageData.fromId,
+        toId: messageData.toId,
+        content: messageData.content,
+        createdAt: new Date().toISOString()
+      };
+      
+      data.messages.push(message);
+      
+      // Send to both users
+      io.to(`user-${messageData.toId}`).emit('receive-message', message);
+      io.to(`user-${messageData.fromId}`).emit('receive-message', message);
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('User disconnected:', socket.id);
+    });
   });
-  
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-  });
-});
+}
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+// Export for Vercel serverless
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  // Start server for local development
+  const PORT = process.env.PORT || 3001;
+  server.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
 
