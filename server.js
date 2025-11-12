@@ -7,6 +7,16 @@ const socketIo = require('socket.io');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
+const mongoose = require('mongoose');
+
+// Database models
+const User = require('./models/User');
+const Group = require('./models/Group');
+const Offer = require('./models/Offer');
+const Message = require('./models/Message');
+
+// Database connection
+const connectDB = require('./db/connect');
 
 const app = express();
 // Only create server and socket.io if not in Vercel (serverless)
@@ -49,64 +59,115 @@ app.get('/', (req, res) => {
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
-// In-memory data storage (can be upgraded to database)
-const data = {
-  users: [],
-  groups: [],
-  offers: [],
-  messages: [],
-  sessions: {} // Store OAuth sessions temporarily
+// OAuth sessions (temporary, in-memory is fine)
+const sessions = {};
+
+// Initialize database connection
+connectDB();
+
+// Helper functions - use database or fallback to in-memory
+const findUser = async (userId) => {
+  if (mongoose.connection.readyState === 1) {
+    return await User.findById(userId);
+  }
+  return null;
 };
 
-// Helper functions
-const findUser = (userId) => data.users.find(u => u.id === userId);
-const findGroup = (groupId) => data.groups.find(g => g.id === groupId);
-const findOffer = (offerId) => data.offers.find(o => o.id === offerId);
+const findUserByEmail = async (email) => {
+  if (mongoose.connection.readyState === 1) {
+    return await User.findOne({ email: email.toLowerCase().trim() });
+  }
+  return null;
+};
+
+const findGroup = async (groupId) => {
+  if (mongoose.connection.readyState === 1) {
+    return await Group.findById(groupId).populate('members', 'name email picture');
+  }
+  return null;
+};
+
+const findOffer = async (offerId) => {
+  if (mongoose.connection.readyState === 1) {
+    return await Offer.findById(offerId).populate('providerId', 'name email');
+  }
+  return null;
+};
 
 // Authentication routes
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { name, email, password, userType } = req.body;
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email, and password are required' });
   }
   
-  if (data.users.find(u => u.email === email)) {
-    return res.status(400).json({ error: 'Email already registered' });
+  try {
+    // Check if user exists
+    const existingUser = await findUserByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+    
+    // Create new user
+    const user = new User({
+      name,
+      email: email.trim().toLowerCase(),
+      password: password, // In production, hash passwords with bcrypt
+      userType: userType || 'homeowner',
+      authMethod: 'email'
+    });
+    
+    await user.save();
+    
+    res.json({ 
+      user: { 
+        id: user._id.toString(), 
+        name: user.name, 
+        email: user.email, 
+        userType: user.userType 
+      } 
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Failed to register user' });
   }
-  
-  const user = {
-    id: uuidv4(),
-    name,
-    email: email.trim().toLowerCase(),
-    password: password, // In production, hash passwords
-    userType: userType || 'homeowner', // 'homeowner' or 'provider'
-    createdAt: new Date().toISOString()
-  };
-  
-  data.users.push(user);
-  res.json({ user: { id: user.id, name: user.name, email: user.email, userType: user.userType } });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
   
-  const normalizedEmail = email.trim().toLowerCase();
-  const user = data.users.find(u => u.email === normalizedEmail);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+  try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await findUserByEmail(normalizedEmail);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    if (user.password !== password) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    const token = Buffer.from(JSON.stringify({ userId: user._id.toString(), email: user.email })).toString('base64');
+    res.json({ 
+      token, 
+      user: { 
+        id: user._id.toString(), 
+        name: user.name, 
+        email: user.email, 
+        userType: user.userType,
+        picture: user.picture
+      } 
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Failed to login' });
   }
-  
-  if (user.password !== password) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  
-  res.json({ user: { id: user.id, name: user.name, email: user.email, userType: user.userType } });
 });
 
 // Helper function to get base URL from request
@@ -175,8 +236,8 @@ app.get('/api/auth/google', (req, res) => {
   console.log('Final Redirect URI:', redirectUri);
   console.log('All headers:', JSON.stringify(req.headers, null, 2));
   
-  // Store state for verification
-  data.sessions[state] = {
+  // Store state for verification (sessions stay in-memory, they're temporary)
+  sessions[state] = {
     createdAt: Date.now(),
     userType: req.query.userType || 'homeowner'
   };
@@ -201,16 +262,16 @@ app.get('/api/auth/google/callback', async (req, res) => {
   }
   
   // Verify state
-  const session = data.sessions[state];
+  const session = sessions[state];
   if (!session) {
     return res.redirect(`/?error=invalid_state`);
   }
   
   // Clean up old sessions (older than 10 minutes)
   const now = Date.now();
-  Object.keys(data.sessions).forEach(key => {
-    if (now - data.sessions[key].createdAt > 600000) {
-      delete data.sessions[key];
+  Object.keys(sessions).forEach(key => {
+    if (now - sessions[key].createdAt > 600000) {
+      delete sessions[key];
     }
   });
   
@@ -252,21 +313,24 @@ app.get('/api/auth/google/callback', async (req, res) => {
     const normalizedEmail = email.toLowerCase();
     
     // Find or create user
-    let user = data.users.find(u => u.email === normalizedEmail || u.googleId === googleId);
+    let user = await findUserByEmail(normalizedEmail);
+    
+    if (!user && mongoose.connection.readyState === 1) {
+      // Check if user exists by Google ID
+      user = await User.findOne({ googleId });
+    }
     
     if (!user) {
       // Create new user
-      user = {
-        id: uuidv4(),
+      user = new User({
         name: name || email.split('@')[0],
         email: normalizedEmail,
         googleId: googleId,
         picture: picture,
         userType: session.userType || 'homeowner',
-        createdAt: new Date().toISOString(),
         authMethod: 'google'
-      };
-      data.users.push(user);
+      });
+      await user.save();
     } else {
       // Update existing user with Google info if needed
       if (!user.googleId) {
@@ -276,14 +340,16 @@ app.get('/api/auth/google/callback', async (req, res) => {
         user.picture = picture;
       }
       user.authMethod = 'google';
+      await user.save();
     }
     
     // Clean up session
-    delete data.sessions[state];
+    delete sessions[state];
     
     // Redirect to frontend with token (in production, use secure httpOnly cookies)
-    const token = Buffer.from(JSON.stringify({ userId: user.id, email: user.email })).toString('base64');
-    res.redirect(`/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: user.id, name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
+    const token = Buffer.from(JSON.stringify({ userId: user._id.toString(), email: user.email })).toString('base64');
+    const baseUrl = getBaseUrl(req);
+    res.redirect(`${baseUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: user._id.toString(), name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
     
   } catch (error) {
     console.error('Google OAuth error:', error.response?.data || error.message);
@@ -292,7 +358,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
 });
 
 // Verify token endpoint
-app.get('/api/auth/verify', (req, res) => {
+app.get('/api/auth/verify', async (req, res) => {
   const token = req.query.token;
   
   if (!token) {
@@ -301,137 +367,327 @@ app.get('/api/auth/verify', (req, res) => {
   
   try {
     const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-    const user = data.users.find(u => u.id === decoded.userId && u.email === decoded.email);
+    const user = await findUser(decoded.userId);
     
-    if (!user) {
+    if (!user || user.email !== decoded.email) {
       return res.status(401).json({ error: 'Invalid token' });
     }
     
-    res.json({ user: { id: user.id, name: user.name, email: user.email, userType: user.userType, picture: user.picture } });
+    res.json({ 
+      user: { 
+        id: user._id.toString(), 
+        name: user.name, 
+        email: user.email, 
+        userType: user.userType, 
+        picture: user.picture 
+      } 
+    });
   } catch (error) {
+    console.error('Token verification error:', error);
     res.status(401).json({ error: 'Invalid token' });
   }
 });
 
 // Group routes
-app.get('/api/groups', (req, res) => {
-  res.json(data.groups);
+app.get('/api/groups', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState === 1) {
+      const groups = await Group.find()
+        .populate('members', 'name email picture')
+        .populate('createdBy', 'name email')
+        .lean();
+      
+      // Transform to match frontend expectations
+      const transformedGroups = groups.map(group => ({
+        id: group._id.toString(),
+        name: group.name,
+        zip: group.zip,
+        address: group.address,
+        members: group.members ? group.members.length : 0,
+        memberDetails: group.members || []
+      }));
+      
+      res.json(transformedGroups);
+    } else {
+      res.json([]);
+    }
+  } catch (error) {
+    console.error('Error fetching groups:', error);
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
 });
 
-app.post('/api/groups', (req, res) => {
-  const { name, description, creatorId, address, area, zip } = req.body;
+app.post('/api/groups', async (req, res) => {
+  const { name, address, zip, creatorId } = req.body;
   
-  // Extract ZIP from address if not provided
-  let groupZip = zip;
-  if (!groupZip && address) {
-    const zipMatch = address.match(/\b\d{5}\b/);
-    if (zipMatch) groupZip = zipMatch[0];
+  if (!name || !creatorId) {
+    return res.status(400).json({ error: 'Name and creator ID are required' });
   }
   
-  const group = {
-    id: uuidv4(),
-    name,
-    description,
-    creatorId,
-    address,
-    zip: groupZip || '',
-    area: parseFloat(area) || 0,
-    members: creatorId ? [creatorId] : [],
-    createdAt: new Date().toISOString()
-  };
-  
-  data.groups.push(group);
-  res.json(group);
+  try {
+    // Extract ZIP from address if not provided
+    let groupZip = zip;
+    if (!groupZip && address) {
+      const zipMatch = address.match(/\b\d{5}\b/);
+      if (zipMatch) groupZip = zipMatch[0];
+    }
+    
+    if (!groupZip) {
+      return res.status(400).json({ error: 'ZIP code is required' });
+    }
+    
+    // Verify creator exists
+    const creator = await findUser(creatorId);
+    if (!creator) {
+      return res.status(404).json({ error: 'Creator not found' });
+    }
+    
+    const group = new Group({
+      name,
+      address: address || '',
+      zip: groupZip,
+      createdBy: creatorId,
+      members: [creatorId] // Creator is first member
+    });
+    
+    await group.save();
+    await group.populate('members', 'name email picture');
+    await group.populate('createdBy', 'name email');
+    
+    res.json({
+      id: group._id.toString(),
+      name: group.name,
+      zip: group.zip,
+      address: group.address,
+      members: group.members ? group.members.length : 1,
+      memberDetails: group.members || []
+    });
+  } catch (error) {
+    console.error('Error creating group:', error);
+    res.status(500).json({ error: 'Failed to create group' });
+  }
 });
 
-app.post('/api/groups/:groupId/join', (req, res) => {
+app.post('/api/groups/:groupId/join', async (req, res) => {
   const { groupId } = req.params;
   const { userId } = req.body;
   
-  const group = findGroup(groupId);
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
   }
   
-  if (!group.members.includes(userId)) {
-    group.members.push(userId);
+  try {
+    const group = await findGroup(groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+    
+    // Check if user is already a member
+    const memberIds = group.members.map(m => m._id ? m._id.toString() : m.toString());
+    if (!memberIds.includes(userId)) {
+      group.members.push(userId);
+      await group.save();
+    }
+    
+    await group.populate('members', 'name email picture');
+    
+    res.json({
+      id: group._id.toString(),
+      name: group.name,
+      zip: group.zip,
+      address: group.address,
+      members: group.members ? group.members.length : 0,
+      memberDetails: group.members || []
+    });
+  } catch (error) {
+    console.error('Error joining group:', error);
+    res.status(500).json({ error: 'Failed to join group' });
   }
-  
-  res.json(group);
 });
 
-app.get('/api/groups/:groupId', (req, res) => {
-  const group = findGroup(req.params.groupId);
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
+app.get('/api/groups/:groupId', async (req, res) => {
+  try {
+    const group = await findGroup(req.params.groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+    
+    res.json({
+      id: group._id.toString(),
+      name: group.name,
+      zip: group.zip,
+      address: group.address,
+      members: group.members ? group.members.length : 0,
+      memberDetails: group.members || []
+    });
+  } catch (error) {
+    console.error('Error fetching group:', error);
+    res.status(500).json({ error: 'Failed to fetch group' });
   }
-  res.json(group);
 });
 
 // Offer routes
-app.get('/api/offers', (req, res) => {
+app.get('/api/offers', async (req, res) => {
   const { groupId, minHomes, maxHomes } = req.query;
-  let offers = data.offers;
   
-  if (groupId) {
-    const group = findGroup(groupId);
-    if (group) {
-      const homeCount = group.members.length;
-      offers = offers.filter(o => 
-        o.minHomes <= homeCount && o.maxHomes >= homeCount
-      );
+  try {
+    let offers = [];
+    if (mongoose.connection.readyState === 1) {
+      offers = await Offer.find()
+        .populate('providerId', 'name email picture')
+        .lean();
     }
-  }
   
-  if (minHomes) {
-    offers = offers.filter(o => o.maxHomes >= parseInt(minHomes));
+    // Transform to match frontend expectations
+    let transformedOffers = offers.map(offer => ({
+      id: offer._id.toString(),
+      providerId: offer.providerId._id ? offer.providerId._id.toString() : offer.providerId.toString(),
+      title: offer.title,
+      description: offer.description,
+      minHomes: offer.minHomes,
+      maxHomes: offer.maxHomes,
+      basePrice: offer.basePrice,
+      pricePerHome: offer.pricePerHome,
+      amenities: offer.amenities,
+      areaCoverage: offer.areaCoverage,
+      createdAt: offer.createdAt
+    }));
+    
+    // Filter by group size if groupId provided
+    if (groupId) {
+      const group = await findGroup(groupId);
+      if (group) {
+        const homeCount = group.members ? group.members.length : 0;
+        transformedOffers = transformedOffers.filter(o => 
+          o.minHomes <= homeCount && o.maxHomes >= homeCount
+        );
+      }
+    }
+    
+    // Filter by min/max homes
+    if (minHomes) {
+      transformedOffers = transformedOffers.filter(o => o.maxHomes >= parseInt(minHomes));
+    }
+    
+    if (maxHomes) {
+      transformedOffers = transformedOffers.filter(o => o.minHomes <= parseInt(maxHomes));
+    }
+    
+    res.json(transformedOffers);
+  } catch (error) {
+    console.error('Error fetching offers:', error);
+    res.status(500).json({ error: 'Failed to fetch offers' });
   }
-  
-  if (maxHomes) {
-    offers = offers.filter(o => o.minHomes <= parseInt(maxHomes));
-  }
-  
-  res.json(offers);
 });
 
-app.post('/api/offers', (req, res) => {
+app.post('/api/offers', async (req, res) => {
   const { providerId, title, description, minHomes, maxHomes, basePrice, pricePerHome, amenities, areaCoverage } = req.body;
   
-  const offer = {
-    id: uuidv4(),
-    providerId,
-    title,
-    description,
-    minHomes: parseInt(minHomes) || 1,
-    maxHomes: parseInt(maxHomes) || 100,
-    basePrice: parseFloat(basePrice) || 0,
-    pricePerHome: parseFloat(pricePerHome) || 0,
-    amenities: amenities || [],
-    areaCoverage: parseFloat(areaCoverage) || 0,
-    createdAt: new Date().toISOString()
-  };
+  if (!providerId || !title) {
+    return res.status(400).json({ error: 'Provider ID and title are required' });
+  }
   
-  data.offers.push(offer);
-  res.json(offer);
+  try {
+    // Verify provider exists
+    const provider = await findUser(providerId);
+    if (!provider) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+    
+    const offer = new Offer({
+      providerId,
+      title,
+      description: description || '',
+      minHomes: parseInt(minHomes) || 1,
+      maxHomes: parseInt(maxHomes) || 100,
+      basePrice: parseFloat(basePrice) || 0,
+      pricePerHome: parseFloat(pricePerHome) || 0,
+      amenities: amenities || [],
+      areaCoverage: parseFloat(areaCoverage) || 0
+    });
+    
+    await offer.save();
+    await offer.populate('providerId', 'name email picture');
+    
+    res.json({
+      id: offer._id.toString(),
+      providerId: offer.providerId._id.toString(),
+      title: offer.title,
+      description: offer.description,
+      minHomes: offer.minHomes,
+      maxHomes: offer.maxHomes,
+      basePrice: offer.basePrice,
+      pricePerHome: offer.pricePerHome,
+      amenities: offer.amenities,
+      areaCoverage: offer.areaCoverage,
+      createdAt: offer.createdAt
+    });
+  } catch (error) {
+    console.error('Error creating offer:', error);
+    res.status(500).json({ error: 'Failed to create offer' });
+  }
 });
 
-app.get('/api/offers/:offerId', (req, res) => {
-  const offer = findOffer(req.params.offerId);
-  if (!offer) {
-    return res.status(404).json({ error: 'Offer not found' });
+app.get('/api/offers/:offerId', async (req, res) => {
+  try {
+    const offer = await findOffer(req.params.offerId);
+    if (!offer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+    
+    res.json({
+      id: offer._id.toString(),
+      providerId: offer.providerId._id ? offer.providerId._id.toString() : offer.providerId.toString(),
+      title: offer.title,
+      description: offer.description,
+      minHomes: offer.minHomes,
+      maxHomes: offer.maxHomes,
+      basePrice: offer.basePrice,
+      pricePerHome: offer.pricePerHome,
+      amenities: offer.amenities,
+      areaCoverage: offer.areaCoverage,
+      createdAt: offer.createdAt
+    });
+  } catch (error) {
+    console.error('Error fetching offer:', error);
+    res.status(500).json({ error: 'Failed to fetch offer' });
   }
-  res.json(offer);
 });
 
 // Message routes
-app.get('/api/messages/:userId/:otherUserId', (req, res) => {
+app.get('/api/messages/:userId/:otherUserId', async (req, res) => {
   const { userId, otherUserId } = req.params;
-  const messages = data.messages.filter(m => 
-    (m.fromId === userId && m.toId === otherUserId) ||
-    (m.fromId === otherUserId && m.toId === userId)
-  ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   
-  res.json(messages);
+  try {
+    let messages = [];
+    if (mongoose.connection.readyState === 1) {
+      messages = await Message.find({
+        $or: [
+          { fromId: userId, toId: otherUserId },
+          { fromId: otherUserId, toId: userId }
+        ]
+      })
+      .populate('fromId', 'name email picture')
+      .populate('toId', 'name email picture')
+      .sort({ createdAt: 1 })
+      .lean();
+    }
+    
+    // Transform to match frontend expectations
+    const transformedMessages = messages.map(msg => ({
+      id: msg._id.toString(),
+      fromId: msg.fromId._id ? msg.fromId._id.toString() : msg.fromId.toString(),
+      toId: msg.toId._id ? msg.toId._id.toString() : msg.toId.toString(),
+      content: msg.content,
+      offerId: msg.offerId ? msg.offerId.toString() : null,
+      createdAt: msg.createdAt
+    }));
+    
+    res.json(transformedMessages);
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
 });
 
 // Socket.io for real-time chat (only if not in Vercel)
