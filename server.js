@@ -528,9 +528,12 @@ app.get('/api/auth/verify', async (req, res) => {
       return res.status(401).json({ error: 'Invalid token' });
     }
     
+    // Handle both database and in-memory users
+    const userId = user._id ? user._id.toString() : (user.id || decoded.userId);
+    
     res.json({ 
       user: { 
-        id: user._id.toString(), 
+        id: userId, 
         name: user.name, 
         email: user.email, 
         userType: user.userType, 
