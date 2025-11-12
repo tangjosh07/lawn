@@ -4,7 +4,7 @@ A web application that connects neighbors to form groups and find lawncare provi
 
 ## Features
 
-- **User Authentication**: Register and login as either a homeowner or lawncare provider
+- **User Authentication**: Google OAuth login for seamless authentication
 - **Group Management**: Homeowners can create groups with neighbors and join existing groups
 - **Dynamic Pricing**: Providers can create offers with pricing based on:
   - Number of homes (min/max range)
@@ -12,6 +12,7 @@ A web application that connects neighbors to form groups and find lawncare provi
   - Amenities (mowing, edging, fertilizing, weed control, mulching, leaf removal)
 - **Offer Browsing**: Homeowners can browse offers filtered by their group size
 - **Real-time Chat**: Direct messaging between homeowners and providers to finalize deals
+- **Modern UI**: Clean, neighborly design with glassmorphism effects and smooth animations
 
 ## Installation
 
@@ -20,12 +21,20 @@ A web application that connects neighbors to form groups and find lawncare provi
 npm install
 ```
 
-2. Start the server:
+2. Set up environment variables:
+Create a `.env` file with your Google OAuth credentials:
+```
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+BASE_URL=http://localhost:3001
+```
+
+3. Start the server:
 ```bash
 npm start
 ```
 
-3. Open your browser and navigate to:
+4. Open your browser and navigate to:
 ```
 http://localhost:3001
 ```
@@ -35,13 +44,14 @@ Note: The server runs on port 3001 by default. You can change this by setting th
 ## Usage
 
 ### For Homeowners:
-1. Register/Login as a homeowner
-2. Create a group with your neighbors or join an existing group
-3. Browse available offers from lawncare providers
-4. Click "Chat with Provider" to discuss details and finalize deals
+1. Sign in with Google
+2. Search for groups in your ZIP code or start a new group
+3. Join a group to unlock discounts (3+ members = 10% off, 6+ = 20% off)
+4. Browse available offers from lawncare providers
+5. Chat with providers to finalize deals
 
 ### For Providers:
-1. Register/Login as a provider
+1. Sign in with Google
 2. Create offers with:
    - Title and description
    - Minimum and maximum number of homes
@@ -55,6 +65,7 @@ Note: The server runs on port 3001 by default. You can change this by setting th
 - **Backend**: Node.js, Express.js
 - **Real-time Communication**: Socket.io
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3
+- **Authentication**: Google OAuth 2.0
 - **Storage**: In-memory (can be upgraded to database)
 
 ## Project Structure
@@ -63,16 +74,19 @@ Note: The server runs on port 3001 by default. You can change this by setting th
 lawnlink/
 ├── server.js          # Express server with API routes and Socket.io
 ├── index.html         # Main HTML file
-├── app.js            # Frontend JavaScript
-├── styles.css        # Styling
+├── assets/
+│   ├── app.js        # Frontend JavaScript
+│   └── styles.css    # Styling
 ├── package.json      # Dependencies
+├── .env              # Environment variables (Google OAuth)
 └── README.md         # This file
 ```
 
 ## API Endpoints
 
-- `POST /api/register` - Register new user
-- `POST /api/login` - Login user
+- `GET /api/auth/google` - Initiate Google OAuth
+- `GET /api/auth/google/callback` - Google OAuth callback
+- `GET /api/auth/verify` - Verify authentication token
 - `GET /api/groups` - Get all groups
 - `POST /api/groups` - Create new group
 - `POST /api/groups/:groupId/join` - Join a group
