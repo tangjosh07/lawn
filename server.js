@@ -27,7 +27,10 @@ app.get('/', (req, res) => {
 // Set these in environment variables or create a .env file
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+
+// Auto-detect BASE_URL from Vercel or use environment variable
+const BASE_URL = process.env.BASE_URL || 
+                 (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001');
 
 // In-memory data storage (can be upgraded to database)
 const data = {
@@ -89,6 +92,22 @@ app.post('/api/login', (req, res) => {
   res.json({ user: { id: user.id, name: user.name, email: user.email, userType: user.userType } });
 });
 
+// Helper function to get base URL from request
+function getBaseUrl(req) {
+  // Use explicit BASE_URL env var first
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL;
+  }
+  // Use Vercel URL if available
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  // Fallback to request headers (for Vercel and other platforms)
+  const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3001';
+  return `${protocol}://${host}`;
+}
+
 // Google OAuth routes
 app.get('/api/auth/google', (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
@@ -96,7 +115,8 @@ app.get('/api/auth/google', (req, res) => {
   }
   
   const state = uuidv4();
-  const redirectUri = `${BASE_URL}/api/auth/google/callback`;
+  const baseUrl = getBaseUrl(req);
+  const redirectUri = `${baseUrl}/api/auth/google/callback`;
   const scope = 'openid email profile';
   
   // Store state for verification
