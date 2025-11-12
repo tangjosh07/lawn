@@ -62,8 +62,11 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 // OAuth sessions (temporary, in-memory is fine)
 const sessions = {};
 
-// Initialize database connection
-connectDB();
+// Initialize database connection (async, but don't block)
+// Connection will be established on first use
+connectDB().catch(err => {
+  console.error('Initial DB connection attempt failed (will retry on first use):', err);
+});
 
 // Helper functions - use database or fallback to in-memory
 const findUser = async (userId) => {
@@ -315,9 +318,13 @@ app.get('/api/auth/google/callback', async (req, res) => {
     // Find or create user
     let user = await findUserByEmail(normalizedEmail);
     
-    if (!user && mongoose.connection.readyState === 1) {
+    if (!user && await ensureDB()) {
       // Check if user exists by Google ID
-      user = await User.findOne({ googleId });
+      try {
+        user = await User.findOne({ googleId });
+      } catch (error) {
+        console.error('Error finding user by Google ID:', error);
+      }
     }
     
     if (!user) {
@@ -391,7 +398,7 @@ app.get('/api/auth/verify', async (req, res) => {
 // Group routes
 app.get('/api/groups', async (req, res) => {
   try {
-    if (mongoose.connection.readyState === 1) {
+    if (await ensureDB()) {
       const groups = await Group.find()
         .populate('members', 'name email picture')
         .populate('createdBy', 'name email')
@@ -532,7 +539,7 @@ app.get('/api/offers', async (req, res) => {
   
   try {
     let offers = [];
-    if (mongoose.connection.readyState === 1) {
+    if (await ensureDB()) {
       offers = await Offer.find()
         .populate('providerId', 'name email picture')
         .lean();
@@ -660,7 +667,7 @@ app.get('/api/messages/:userId/:otherUserId', async (req, res) => {
   
   try {
     let messages = [];
-    if (mongoose.connection.readyState === 1) {
+    if (await ensureDB()) {
       messages = await Message.find({
         $or: [
           { fromId: userId, toId: otherUserId },
@@ -703,30 +710,44 @@ if (io) {
       try {
         // Save message to database
         let message;
-        if (mongoose.connection.readyState === 1) {
-          message = new Message({
-            fromId: messageData.fromId,
-            toId: messageData.toId,
-            content: messageData.content,
-            offerId: messageData.offerId || null
-          });
-          await message.save();
-          await message.populate('fromId', 'name email picture');
-          await message.populate('toId', 'name email picture');
-          
-          // Transform for socket emission
-          const messageObj = {
-            id: message._id.toString(),
-            fromId: message.fromId._id.toString(),
-            toId: message.toId._id.toString(),
-            content: message.content,
-            offerId: message.offerId ? message.offerId.toString() : null,
-            createdAt: message.createdAt
-          };
-          
-          // Send to both users
-          io.to(`user-${messageData.toId}`).emit('receive-message', messageObj);
-          io.to(`user-${messageData.fromId}`).emit('receive-message', messageObj);
+        if (await ensureDB()) {
+          try {
+            message = new Message({
+              fromId: messageData.fromId,
+              toId: messageData.toId,
+              content: messageData.content,
+              offerId: messageData.offerId || null
+            });
+            await message.save();
+            await message.populate('fromId', 'name email picture');
+            await message.populate('toId', 'name email picture');
+            
+            // Transform for socket emission
+            const messageObj = {
+              id: message._id.toString(),
+              fromId: message.fromId._id.toString(),
+              toId: message.toId._id.toString(),
+              content: message.content,
+              offerId: message.offerId ? message.offerId.toString() : null,
+              createdAt: message.createdAt
+            };
+            
+            // Send to both users
+            io.to(`user-${messageData.toId}`).emit('receive-message', messageObj);
+            io.to(`user-${messageData.fromId}`).emit('receive-message', messageObj);
+          } catch (error) {
+            console.error('Error saving message to DB:', error);
+            // Fallback to in-memory
+            const messageObj = {
+              id: uuidv4(),
+              fromId: messageData.fromId,
+              toId: messageData.toId,
+              content: messageData.content,
+              createdAt: new Date().toISOString()
+            };
+            io.to(`user-${messageData.toId}`).emit('receive-message', messageObj);
+            io.to(`user-${messageData.fromId}`).emit('receive-message', messageObj);
+          }
         } else {
           // Fallback to in-memory if DB not available
           const messageObj = {
