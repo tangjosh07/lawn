@@ -62,6 +62,9 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 // OAuth sessions (temporary, in-memory is fine)
 const sessions = {};
 
+// In-memory user storage (fallback when DB not available)
+const inMemoryUsers = [];
+
 // Initialize database connection (async, but don't block)
 // Connection will be established on first use
 connectDB().catch(err => {
@@ -116,10 +119,12 @@ const findUserByEmail = async (email) => {
       return await User.findOne({ email: email.toLowerCase().trim() });
     } catch (error) {
       console.error('Error finding user by email:', error);
-      return null;
+      // Fall back to in-memory
     }
   }
-  return null;
+  // Fallback to in-memory storage
+  const normalizedEmail = email.toLowerCase().trim();
+  return inMemoryUsers.find(u => u.email === normalizedEmail) || null;
 };
 
 const findGroup = async (groupId) => {
@@ -384,6 +389,11 @@ app.get('/api/auth/google/callback', async (req, res) => {
       }
     }
     
+    // Also check in-memory storage
+    if (!user) {
+      user = inMemoryUsers.find(u => u.googleId === googleId || u.email === normalizedEmail) || null;
+    }
+    
     if (!user) {
       // Create new user
       if (await ensureDB()) {
@@ -397,19 +407,50 @@ app.get('/api/auth/google/callback', async (req, res) => {
             authMethod: 'google'
           });
           await user.save();
+          // Convert to plain object for response
+          user = {
+            _id: user._id,
+            id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+            googleId: user.googleId,
+            picture: user.picture,
+            userType: user.userType
+          };
         } catch (error) {
           console.error('Error creating user in database:', error);
-          // If DB save fails, we can't proceed - return error
-          return res.redirect(`/?error=database_error`);
+          // Fall back to in-memory storage
+          console.warn('Falling back to in-memory user storage');
+          const userId = uuidv4();
+          user = {
+            id: userId,
+            name: name || email.split('@')[0],
+            email: normalizedEmail,
+            googleId: googleId,
+            picture: picture,
+            userType: session.userType || 'homeowner',
+            authMethod: 'google'
+          };
+          inMemoryUsers.push(user);
         }
       } else {
-        // Database not available - can't create user
-        console.error('Database not available - cannot create user');
-        return res.redirect(`/?error=database_unavailable`);
+        // Database not available - use in-memory storage
+        console.warn('Database not available - using in-memory storage');
+        const userId = uuidv4();
+        user = {
+          id: userId,
+          name: name || email.split('@')[0],
+          email: normalizedEmail,
+          googleId: googleId,
+          picture: picture,
+          userType: session.userType || 'homeowner',
+          authMethod: 'google'
+        };
+        inMemoryUsers.push(user);
       }
     } else {
       // Update existing user with Google info if needed
-      if (await ensureDB()) {
+      if (await ensureDB() && user.save) {
         try {
           if (!user.googleId) {
             user.googleId = googleId;
@@ -424,15 +465,28 @@ app.get('/api/auth/google/callback', async (req, res) => {
           // Continue anyway - user exists, just couldn't update
         }
       }
+      
+      // Convert Mongoose document to plain object if needed
+      if (user._id && typeof user._id.toString === 'function') {
+        user = {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          googleId: user.googleId,
+          picture: user.picture,
+          userType: user.userType
+        };
+      }
     }
     
     // Clean up session
     delete sessions[state];
     
     // Redirect to frontend with token (in production, use secure httpOnly cookies)
-    const token = Buffer.from(JSON.stringify({ userId: user._id.toString(), email: user.email })).toString('base64');
-    // Reuse baseUrl from line 320
-    res.redirect(`${cleanBaseUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: user._id.toString(), name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
+    const userId = user.id || user._id?.toString() || user._id;
+    const token = Buffer.from(JSON.stringify({ userId: userId, email: user.email })).toString('base64');
+    // Reuse cleanBaseUrl from line 341
+    res.redirect(`${cleanBaseUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: userId, name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
     
   } catch (error) {
     console.error('Google OAuth error:', error.response?.data || error.message);
