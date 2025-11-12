@@ -17,15 +17,8 @@ if (!process.env.VERCEL) {
 }
 
 app.use(express.json());
-
-// Serve static files (only in Vercel, local dev uses express.static)
-if (process.env.VERCEL) {
-  app.use(express.static(path.join(__dirname)));
-  app.use('/assets', express.static(path.join(__dirname, 'assets')));
-} else {
-  app.use(express.static(path.join(__dirname)));
-  app.use('/assets', express.static(path.join(__dirname, 'assets')));
-}
+app.use(express.static(path.join(__dirname)));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
