@@ -111,39 +111,49 @@ app.post('/api/login', (req, res) => {
 
 // Helper function to get base URL from request
 function getBaseUrl(req) {
-  // Use explicit BASE_URL env var first
-  if (process.env.BASE_URL) {
-    return process.env.BASE_URL.replace(/\/$/, ''); // Remove trailing slash
-  }
+  // Priority 1: Request headers (most reliable in Vercel)
+  const protocol = req.headers['x-forwarded-proto'] || 
+                   (req.secure ? 'https' : 'http') || 
+                   'https';
+  const host = req.headers['x-forwarded-host'] || 
+               req.headers.host ||
+               req.headers[':authority']; // HTTP/2 header
   
-  // In Vercel, use the request headers to get the actual URL
-  if (process.env.VERCEL) {
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    if (host) {
-      return `${protocol}://${host}`;
-    }
-    // Fallback to VERCEL_URL if headers not available
-    if (process.env.VERCEL_URL) {
-      return `https://${process.env.VERCEL_URL}`;
-    }
-  }
-  
-  // Fallback to request headers (for other platforms)
-  const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
   if (host) {
-    return `${protocol}://${host}`;
+    const url = `${protocol}://${host}`.replace(/\/$/, '');
+    console.log('Using request headers - Base URL:', url);
+    return url;
   }
   
-  // Last resort: throw error in production, localhost only for local dev
-  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-    console.error('ERROR: Could not determine base URL in production!');
-    console.error('Please set BASE_URL environment variable');
-    throw new Error('BASE_URL environment variable is required in production');
+  // Priority 2: Explicit BASE_URL env var
+  if (process.env.BASE_URL) {
+    const url = process.env.BASE_URL.replace(/\/$/, '');
+    console.log('Using BASE_URL env var - Base URL:', url);
+    return url;
   }
-  // Only allow localhost fallback in local development
-  console.warn('Warning: Could not determine base URL, using localhost fallback (local dev only)');
+  
+  // Priority 3: VERCEL_URL env var (Vercel provides this)
+  if (process.env.VERCEL_URL) {
+    const url = `https://${process.env.VERCEL_URL}`.replace(/\/$/, '');
+    console.log('Using VERCEL_URL env var - Base URL:', url);
+    return url;
+  }
+  
+  // Error in production - should never reach here
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    const error = 'ERROR: Could not determine base URL! Headers: ' + JSON.stringify({
+      'x-forwarded-host': req.headers['x-forwarded-host'],
+      'host': req.headers.host,
+      'x-forwarded-proto': req.headers['x-forwarded-proto'],
+      'BASE_URL': process.env.BASE_URL,
+      'VERCEL_URL': process.env.VERCEL_URL
+    });
+    console.error(error);
+    throw new Error('Could not determine base URL in production');
+  }
+  
+  // Only for local development
+  console.warn('Local dev: Using localhost fallback');
   return 'http://localhost:3001';
 }
 
@@ -161,14 +171,9 @@ app.get('/api/auth/google', (req, res) => {
   
   // Log for debugging
   console.log('=== OAuth Initiation ===');
-  console.log('Base URL:', baseUrl);
-  console.log('Redirect URI:', redirectUri);
-  console.log('VERCEL env:', process.env.VERCEL);
-  console.log('BASE_URL env:', process.env.BASE_URL);
-  console.log('VERCEL_URL env:', process.env.VERCEL_URL);
-  console.log('Request host:', req.headers.host);
-  console.log('x-forwarded-host:', req.headers['x-forwarded-host']);
-  console.log('x-forwarded-proto:', req.headers['x-forwarded-proto']);
+  console.log('Final Base URL:', baseUrl);
+  console.log('Final Redirect URI:', redirectUri);
+  console.log('All headers:', JSON.stringify(req.headers, null, 2));
   
   // Store state for verification
   data.sessions[state] = {
