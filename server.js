@@ -22,7 +22,12 @@ app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  try {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  } catch (error) {
+    console.error('Error serving index.html:', error);
+    res.status(500).send('Error loading page');
+  }
 });
 
 // Google OAuth configuration

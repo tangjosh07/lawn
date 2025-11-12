@@ -2,7 +2,5 @@
 // This file is required because Vercel looks for functions in the /api directory
 const app = require('../server');
 
-// Export the app as a serverless function
-module.exports = (req, res) => {
-  return app(req, res);
-};
+// Export the Express app directly - Vercel handles it automatically
+module.exports = app;
