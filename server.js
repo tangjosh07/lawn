@@ -17,13 +17,21 @@ if (!process.env.VERCEL) {
 }
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname)));
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
+
+// Determine the correct base path for static files
+const staticPath = process.env.VERCEL ? path.join(process.cwd(), 'public') : __dirname;
+const assetsPath = process.env.VERCEL ? path.join(process.cwd(), 'public', 'assets') : path.join(__dirname, 'assets');
+
+app.use(express.static(staticPath));
+app.use('/assets', express.static(assetsPath));
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
   try {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    const indexPath = process.env.VERCEL 
+      ? path.join(process.cwd(), 'public', 'index.html')
+      : path.join(__dirname, 'index.html');
+    res.sendFile(indexPath);
   } catch (error) {
     console.error('Error serving index.html:', error);
     res.status(500).send('Error loading page');
