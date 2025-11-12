@@ -10,8 +10,8 @@ async function connectDB() {
   const MONGODB_URI = process.env.MONGODB_URI;
 
   if (!MONGODB_URI) {
-    console.warn('MONGODB_URI not set. Using in-memory storage.');
-    return;
+    console.warn('MONGODB_URI not set. Database operations will fail.');
+    return null;
   }
 
   // If already connected, return cached connection
@@ -26,19 +26,31 @@ async function connectDB() {
     return await cached.promise;
   }
 
-  // Start new connection
+  // Start new connection with MongoDB recommended options
   try {
     const options = {
-      serverSelectionTimeoutMS: 10000, // Increased to 10 seconds
-      socketTimeoutMS: 45000, // 45 seconds
-      connectTimeoutMS: 10000, // 10 seconds
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      // MongoDB recommended options
+      retryWrites: true,
+      w: 'majority',
+      // For serverless environments
       bufferCommands: false,
       bufferMaxEntries: 0,
-      maxPoolSize: 10,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI, options).then((mongoose) => {
-      console.log('✅ Connected to MongoDB');
+    cached.promise = mongoose.connect(MONGODB_URI, options).then(async (mongoose) => {
+      // Send a ping to confirm successful connection (like MongoDB's example)
+      try {
+        await mongoose.connection.db.admin().ping();
+        console.log('✅ Connected to MongoDB - Ping successful!');
+      } catch (pingError) {
+        console.warn('Connected but ping failed:', pingError);
+      }
+      
       cached.conn = mongoose;
       cached.promise = null;
       return mongoose;
@@ -52,9 +64,9 @@ async function connectDB() {
     return conn;
   } catch (error) {
     console.error('MongoDB connection error:', error);
+    console.error('Connection string (masked):', MONGODB_URI.replace(/:[^:@]+@/, ':****@'));
     cached.promise = null;
-    // Don't throw - allow app to continue with in-memory storage
-    return null;
+    throw error; // Throw error so caller knows connection failed
   }
 }
 

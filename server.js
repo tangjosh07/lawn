@@ -75,9 +75,9 @@ const ensureDB = async () => {
     return true;
   }
   
-  // If no MONGODB_URI, return false (will use in-memory)
+  // If no MONGODB_URI, return false
   if (!process.env.MONGODB_URI) {
-    console.warn('MONGODB_URI not set - using in-memory storage');
+    console.error('❌ MONGODB_URI not set in environment variables');
     return false;
   }
   
@@ -89,10 +89,15 @@ const ensureDB = async () => {
       return true;
     }
     // If still not ready, wait a bit and check again
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return mongoose.connection.readyState === 1;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const isReady = mongoose.connection.readyState === 1;
+    if (!isReady) {
+      console.error('❌ Database connection not ready. State:', mongoose.connection.readyState);
+    }
+    return isReady;
   } catch (error) {
-    console.error('Failed to connect to database:', error);
+    console.error('❌ Failed to connect to database:', error.message);
+    console.error('Make sure MONGODB_URI is set correctly in Vercel environment variables');
     return false;
   }
 };
