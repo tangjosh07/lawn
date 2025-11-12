@@ -371,13 +371,13 @@ app.get('/api/auth/google/callback', async (req, res) => {
     const { access_token } = tokenResponse.data;
     
     // Get user info from Google
-    const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+    const googleUserResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
         Authorization: `Bearer ${access_token}`
       }
     });
     
-    const { id: googleId, email, name, picture } = userResponse.data;
+    const { id: googleId, email, name, picture } = googleUserResponse.data;
     const normalizedEmail = email.toLowerCase();
     
     // Find or create user
