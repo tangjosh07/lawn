@@ -393,8 +393,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
     
     // Redirect to frontend with token (in production, use secure httpOnly cookies)
     const token = Buffer.from(JSON.stringify({ userId: user._id.toString(), email: user.email })).toString('base64');
-    const baseUrl = getBaseUrl(req);
-    res.redirect(`${baseUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: user._id.toString(), name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
+    // Reuse baseUrl from line 320
+    res.redirect(`${cleanBaseUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify({ id: user._id.toString(), name: user.name, email: user.email, userType: user.userType, picture: user.picture }))}`);
     
   } catch (error) {
     console.error('Google OAuth error:', error.response?.data || error.message);
