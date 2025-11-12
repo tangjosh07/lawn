@@ -62,11 +62,25 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 // OAuth sessions (temporary, in-memory is fine)
 const sessions = {};
 
+// Validate MongoDB URI at startup
+console.log('🚀 Starting server...');
+console.log('📋 Environment check:');
+console.log('   MONGODB_URI:', process.env.MONGODB_URI ? '✅ Set' : '❌ NOT SET');
+console.log('   GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ NOT SET');
+console.log('   BASE_URL:', process.env.BASE_URL || 'Not set (will use request headers)');
+
 // Initialize database connection (async, but don't block)
 // Connection will be established on first use
-connectDB().catch(err => {
-  console.error('Initial DB connection attempt failed (will retry on first use):', err);
-});
+if (process.env.MONGODB_URI) {
+  connectDB().then(() => {
+    console.log('✅ Initial database connection attempt completed');
+  }).catch(err => {
+    console.error('❌ Initial DB connection attempt failed (will retry on first use):', err.message);
+  });
+} else {
+  console.error('⚠️  MONGODB_URI not set - database operations will fail!');
+  console.error('   Add MONGODB_URI to Vercel: Settings → Environment Variables');
+}
 
 // Helper function to ensure DB connection
 const ensureDB = async () => {
@@ -75,29 +89,46 @@ const ensureDB = async () => {
     return true;
   }
   
-  // If no MONGODB_URI, return false
+  // If no MONGODB_URI, return false with clear error
   if (!process.env.MONGODB_URI) {
     console.error('❌ MONGODB_URI not set in environment variables');
+    console.error('   Action required: Add MONGODB_URI to Vercel environment variables');
+    console.error('   Format: mongodb+srv://username:password@cluster.mongodb.net/dbname?retryWrites=true&w=majority');
     return false;
   }
   
   // Try to connect
   try {
-    await connectDB();
+    const result = await connectDB();
+    if (!result) {
+      console.error('❌ connectDB() returned null - connection failed');
+      return false;
+    }
+    
     // Check if connection is ready
     if (mongoose.connection.readyState === 1) {
       return true;
     }
+    
     // If still not ready, wait a bit and check again
     await new Promise(resolve => setTimeout(resolve, 1000));
     const isReady = mongoose.connection.readyState === 1;
+    
     if (!isReady) {
-      console.error('❌ Database connection not ready. State:', mongoose.connection.readyState);
+      console.error('❌ Database connection not ready after connectDB()');
+      console.error('   Connection state:', mongoose.connection.readyState);
+      console.error('   States: 0=disconnected, 1=connected, 2=connecting, 3=disconnecting');
     }
+    
     return isReady;
   } catch (error) {
     console.error('❌ Failed to connect to database:', error.message);
-    console.error('Make sure MONGODB_URI is set correctly in Vercel environment variables');
+    console.error('   Error details:', error);
+    console.error('   Check:');
+    console.error('   1. MONGODB_URI is set correctly in Vercel');
+    console.error('   2. Password in connection string is correct');
+    console.error('   3. IP address is whitelisted in MongoDB Atlas (0.0.0.0/0)');
+    console.error('   4. Database name exists in MongoDB Atlas');
     return false;
   }
 };
@@ -464,6 +495,27 @@ app.get('/api/auth/google/callback', async (req, res) => {
     console.error('Google OAuth error:', error.response?.data || error.message);
     res.redirect(`/?error=oauth_error`);
   }
+});
+
+// Health check endpoint to verify database connection
+app.get('/api/health', async (req, res) => {
+  const health = {
+    status: 'ok',
+    database: {
+      connected: false,
+      uriSet: !!process.env.MONGODB_URI,
+      connectionState: mongoose.connection.readyState,
+      stateName: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown'
+    },
+    timestamp: new Date().toISOString()
+  };
+  
+  if (await ensureDB()) {
+    health.database.connected = true;
+    health.database.uriSet = true;
+  }
+  
+  res.json(health);
 });
 
 // Verify token endpoint

@@ -10,9 +10,22 @@ async function connectDB() {
   const MONGODB_URI = process.env.MONGODB_URI;
 
   if (!MONGODB_URI) {
-    console.warn('MONGODB_URI not set. Database operations will fail.');
+    console.error('❌ MONGODB_URI not set in environment variables!');
+    console.error('   Set MONGODB_URI in Vercel: Settings → Environment Variables');
+    console.error('   Format: mongodb+srv://username:password@cluster.mongodb.net/dbname?retryWrites=true&w=majority');
     return null;
   }
+
+  // Validate connection string format
+  if (!MONGODB_URI.startsWith('mongodb://') && !MONGODB_URI.startsWith('mongodb+srv://')) {
+    console.error('❌ Invalid MONGODB_URI format. Must start with mongodb:// or mongodb+srv://');
+    return null;
+  }
+
+  // Log connection attempt (mask password)
+  const maskedUri = MONGODB_URI.replace(/:[^:@]+@/, ':****@');
+  console.log('🔌 Attempting MongoDB connection...');
+  console.log('   URI (masked):', maskedUri);
 
   // If already connected, return cached connection
   if (cached.conn) {
