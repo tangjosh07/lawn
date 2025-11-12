@@ -117,16 +117,32 @@ app.post('/api/login', (req, res) => {
 function getBaseUrl(req) {
   // Use explicit BASE_URL env var first
   if (process.env.BASE_URL) {
-    return process.env.BASE_URL;
+    return process.env.BASE_URL.replace(/\/$/, ''); // Remove trailing slash
   }
-  // Use Vercel URL if available
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  
+  // In Vercel, use the request headers to get the actual URL
+  if (process.env.VERCEL) {
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    if (host) {
+      return `${protocol}://${host}`;
+    }
+    // Fallback to VERCEL_URL if headers not available
+    if (process.env.VERCEL_URL) {
+      return `https://${process.env.VERCEL_URL}`;
+    }
   }
-  // Fallback to request headers (for Vercel and other platforms)
+  
+  // Fallback to request headers (for other platforms)
   const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3001';
-  return `${protocol}://${host}`;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+  
+  // Last resort: localhost (shouldn't happen in production)
+  console.warn('Warning: Could not determine base URL, using localhost fallback');
+  return 'http://localhost:3001';
 }
 
 // Google OAuth routes
@@ -141,9 +157,16 @@ app.get('/api/auth/google', (req, res) => {
   const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
   const scope = 'openid email profile';
   
-  // Log for debugging (remove in production if needed)
-  console.log('OAuth redirect URI:', redirectUri);
+  // Log for debugging
+  console.log('=== OAuth Initiation ===');
   console.log('Base URL:', baseUrl);
+  console.log('Redirect URI:', redirectUri);
+  console.log('VERCEL env:', process.env.VERCEL);
+  console.log('BASE_URL env:', process.env.BASE_URL);
+  console.log('VERCEL_URL env:', process.env.VERCEL_URL);
+  console.log('Request host:', req.headers.host);
+  console.log('x-forwarded-host:', req.headers['x-forwarded-host']);
+  console.log('x-forwarded-proto:', req.headers['x-forwarded-proto']);
   
   // Store state for verification
   data.sessions[state] = {
