@@ -3,7 +3,7 @@ node_modules/
 package-lock.json
 
 # Environment variables
-.env
+# .env - REMOVED: User wants .env file committed
 .env.local
 .env.*.local
 
