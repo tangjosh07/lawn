@@ -406,11 +406,11 @@ if (io) {
   });
 }
 
-// Export for Vercel serverless
-if (process.env.VERCEL) {
-  module.exports = app;
-} else {
-  // Start server for local development
+// Export for Vercel serverless (always export, but only start server locally)
+module.exports = app;
+
+// Only start server for local development
+if (!process.env.VERCEL && server) {
   const PORT = process.env.PORT || 3001;
   server.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
