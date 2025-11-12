@@ -1,0 +1,20 @@
+{
+  "name": "lawnlink",
+  "version": "1.0.0",
+  "description": "Lawncare service platform connecting neighbors with providers",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.1"
+  }
+}

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LawnLink - Neighbors save more on lawn care</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header__inner">
+            <a href="/" class="logo">
+                <div class="logo__icon">🌲</div>
+                <span>LawnLink</span>
+            </a>
+            <div class="header__actions">
+                <button class="btn btn--primary" id="startGroupBtn">Start a Group</button>
+                <div class="user-menu" id="userMenu" style="display: none;">
+                    <button class="user-menu__trigger" id="userMenuTrigger">
+                        <img class="user-menu__avatar" id="userMenuAvatar" src="" alt="User">
+                    </button>
+                    <div class="user-menu__dropdown" id="userMenuDropdown">
+                        <div class="user-menu__info">
+                            <div class="user-menu__name" id="userMenuName"></div>
+                            <div class="user-menu__email" id="userMenuEmail"></div>
+                        </div>
+                        <a href="#" class="user-menu__item" id="profileLink">Profile</a>
+                        <a href="#" class="user-menu__item" id="myGroupsLink">My Groups</a>
+                        <div class="user-menu__divider"></div>
+                        <button class="user-menu__item user-menu__item--logout" id="logoutLink">Logout</button>
+                    </div>
+                </div>
+                <button class="btn btn--ghost btn--small" id="googleLoginBtn" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                        <g fill="#000" fill-rule="evenodd">
+                            <path d="M9 3.48c1.69 0 2.83.73 3.48 1.34l2.54-2.48C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l2.91 2.26C4.6 5.05 6.62 3.48 9 3.48z" fill="#EA4335"/>
+                            <path d="M17.64 9.2c0-.74-.06-1.28-.19-1.84H9v3.34h4.96c-.21 1.18-.84 2.18-1.79 2.85l2.75 2.13c1.63-1.5 2.72-3.7 2.72-6.48z" fill="#4285F4"/>
+                            <path d="M3.88 10.78A5.54 5.54 0 0 1 3.58 9c0-.62.11-1.22.29-1.78L.96 4.96A9.008 9.008 0 0 0 0 9c0 1.45.35 2.82.96 4.04l2.92-2.26z" fill="#FBBC05"/>
+                            <path d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.75-2.13c-.76.53-1.78.9-3.21.9-2.38 0-4.4-1.57-5.12-3.74L.96 13.04C2.45 15.98 5.48 18 9 18z" fill="#34A853"/>
+                        </g>
+                    </svg>
+                    Sign in
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero__background"></div>
+        <div class="container">
+            <div class="hero__content">
+                <h1 class="hero__title">
+                    <span class="hero__title-main">Neighbors save more</span>
+                    <span class="hero__title-sub">on lawn care</span>
+                </h1>
+                <p class="hero__subtitle">Join your neighbors to save together on lawn mowing, snow removal, and more.</p>
+                <div class="hero__search">
+                    <input 
+                        type="text" 
+                        class="input input--hero" 
+                        id="zipInput" 
+                        placeholder="Enter your ZIP code"
+                        maxlength="5"
+                        pattern="[0-9]{5}"
+                        aria-label="ZIP code"
+                    >
+                    <button class="btn btn--primary btn--hero" id="findGroupsBtn">Find Groups</button>
+                </div>
+                <p class="hero__hint" id="heroHint" style="display: none;">No groups yet? <button class="link-button" onclick="document.getElementById('startGroupBtn').click()">Start one!</button></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Groups Section -->
+    <section class="section" id="groupsSection">
+        <div class="container">
+            <h2 class="section__title">Groups near <span id="zipLabel">your ZIP</span></h2>
+            <div class="grid" id="groupGrid">
+                <!-- Groups will be rendered here -->
+            </div>
+        </div>
+    </section>
+
+    <!-- How it Works -->
+    <section class="section how-it-works">
+        <div class="container">
+            <h2 class="section__title">How it works</h2>
+            <div class="how-it-works__grid">
+                <div class="step">
+                    <div class="step__icon">🤝</div>
+                    <h3 class="step__title">Join neighbors</h3>
+                    <p class="step__description">Connect with neighbors in your area to form a group.</p>
+                </div>
+                <div class="step">
+                    <div class="step__icon">🌱</div>
+                    <h3 class="step__title">Reach discount</h3>
+                    <p class="step__description">Hit 3+ members for 10% off, 6+ for 20% savings.</p>
+                </div>
+                <div class="step">
+                    <div class="step__icon">💰</div>
+                    <h3 class="step__title">Enjoy savings</h3>
+                    <p class="step__description">Book services at group rates and save together.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Provider CTA -->
+    <section class="provider-cta">
+        <div class="container">
+            <h2 class="provider-cta__title">For providers</h2>
+            <p class="provider-cta__subtitle">Partner with us to reach more customers and grow your business.</p>
+            <button class="btn btn--ghost" id="partnerBtn">Partner with us</button>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer__links">
+                <a href="#" class="footer__link">Privacy</a>
+                <a href="#" class="footer__link">Terms</a>
+                <a href="#" class="footer__link">Contact</a>
+            </div>
+            <p class="footer__text">© 2024 LawnLink. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- Join Group Modal -->
+    <div class="modal" id="joinModal" role="dialog" aria-modal="true" aria-labelledby="joinModalTitle" aria-hidden="true">
+        <div class="modal__content">
+            <div class="modal__header">
+                <h2 class="modal__title" id="joinModalTitle">Join Group</h2>
+                <button class="modal__close" id="closeJoinModal" aria-label="Close modal">×</button>
+            </div>
+            <form class="modal__form" id="joinForm">
+                <div>
+                    <label for="joinName" class="modal__label">Name</label>
+                    <input 
+                        type="text" 
+                        class="input" 
+                        id="joinName" 
+                        placeholder="Your name"
+                        required
+                        minlength="2"
+                        aria-required="true"
+                    >
+                </div>
+                <div>
+                    <label for="joinEmail" class="modal__label">Email</label>
+                    <input 
+                        type="email" 
+                        class="input" 
+                        id="joinEmail" 
+                        placeholder="your@email.com"
+                        required
+                        aria-required="true"
+                    >
+                </div>
+                <button type="submit" class="btn btn--primary">Join Group</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Start Group Modal -->
+    <div class="modal" id="startGroupModal" role="dialog" aria-modal="true" aria-labelledby="startGroupModalTitle" aria-hidden="true">
+        <div class="modal__content">
+            <div class="modal__header">
+                <h2 class="modal__title" id="startGroupModalTitle">Start a Group</h2>
+                <button class="modal__close" id="closeStartGroupModal" aria-label="Close modal">×</button>
+            </div>
+            <form class="modal__form" id="startGroupForm">
+                <div>
+                    <label for="groupName" class="modal__label">Group Name</label>
+                    <input 
+                        type="text" 
+                        class="input" 
+                        id="groupName" 
+                        placeholder="e.g., Maple Street"
+                        required
+                        minlength="2"
+                        aria-required="true"
+                    >
+                </div>
+                <div>
+                    <label for="groupZip" class="modal__label">ZIP Code</label>
+                    <input 
+                        type="text" 
+                        class="input" 
+                        id="groupZip" 
+                        placeholder="48104"
+                        maxlength="5"
+                        pattern="[0-9]{5}"
+                        required
+                        aria-required="true"
+                    >
+                </div>
+                <button type="submit" class="btn btn--primary">Create Group</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/assets/app.js" defer></script>
+</body>
+</html>
