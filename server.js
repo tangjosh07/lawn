@@ -68,31 +68,68 @@ connectDB().catch(err => {
   console.error('Initial DB connection attempt failed (will retry on first use):', err);
 });
 
+// Helper function to ensure DB connection
+const ensureDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return true;
+  }
+  if (process.env.MONGODB_URI) {
+    try {
+      await connectDB();
+      return mongoose.connection.readyState === 1;
+    } catch (error) {
+      console.error('Failed to connect to database:', error);
+      return false;
+    }
+  }
+  return false;
+};
+
 // Helper functions - use database or fallback to in-memory
 const findUser = async (userId) => {
-  if (mongoose.connection.readyState === 1) {
-    return await User.findById(userId);
+  if (await ensureDB()) {
+    try {
+      return await User.findById(userId);
+    } catch (error) {
+      console.error('Error finding user:', error);
+      return null;
+    }
   }
   return null;
 };
 
 const findUserByEmail = async (email) => {
-  if (mongoose.connection.readyState === 1) {
-    return await User.findOne({ email: email.toLowerCase().trim() });
+  if (await ensureDB()) {
+    try {
+      return await User.findOne({ email: email.toLowerCase().trim() });
+    } catch (error) {
+      console.error('Error finding user by email:', error);
+      return null;
+    }
   }
   return null;
 };
 
 const findGroup = async (groupId) => {
-  if (mongoose.connection.readyState === 1) {
-    return await Group.findById(groupId).populate('members', 'name email picture');
+  if (await ensureDB()) {
+    try {
+      return await Group.findById(groupId).populate('members', 'name email picture');
+    } catch (error) {
+      console.error('Error finding group:', error);
+      return null;
+    }
   }
   return null;
 };
 
 const findOffer = async (offerId) => {
-  if (mongoose.connection.readyState === 1) {
-    return await Offer.findById(offerId).populate('providerId', 'name email');
+  if (await ensureDB()) {
+    try {
+      return await Offer.findById(offerId).populate('providerId', 'name email');
+    } catch (error) {
+      console.error('Error finding offer:', error);
+      return null;
+    }
   }
   return null;
 };
@@ -175,7 +212,13 @@ app.post('/api/login', async (req, res) => {
 
 // Helper function to get base URL from request
 function getBaseUrl(req) {
-  // Priority 1: Request headers (most reliable in Vercel)
+  // Priority 1: Explicit BASE_URL env var (use as-is, don't modify)
+  if (process.env.BASE_URL) {
+    console.log('Using BASE_URL env var - Base URL:', process.env.BASE_URL);
+    return process.env.BASE_URL;
+  }
+  
+  // Priority 2: Request headers (most reliable in Vercel)
   const protocol = req.headers['x-forwarded-proto'] || 
                    (req.secure ? 'https' : 'http') || 
                    'https';
@@ -184,21 +227,14 @@ function getBaseUrl(req) {
                req.headers[':authority']; // HTTP/2 header
   
   if (host) {
-    const url = `${protocol}://${host}`.replace(/\/$/, '');
+    const url = `${protocol}://${host}`;
     console.log('Using request headers - Base URL:', url);
-    return url;
-  }
-  
-  // Priority 2: Explicit BASE_URL env var
-  if (process.env.BASE_URL) {
-    const url = process.env.BASE_URL.replace(/\/$/, '');
-    console.log('Using BASE_URL env var - Base URL:', url);
     return url;
   }
   
   // Priority 3: VERCEL_URL env var (Vercel provides this)
   if (process.env.VERCEL_URL) {
-    const url = `https://${process.env.VERCEL_URL}`.replace(/\/$/, '');
+    const url = `https://${process.env.VERCEL_URL}`;
     console.log('Using VERCEL_URL env var - Base URL:', url);
     return url;
   }
@@ -230,7 +266,8 @@ app.get('/api/auth/google', (req, res) => {
   const state = uuidv4();
   const baseUrl = getBaseUrl(req);
   // Ensure no trailing slash and correct path
-  const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
+  const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  const redirectUri = `${cleanBaseUrl}/api/auth/google/callback`;
   const scope = 'openid email profile';
   
   // Log for debugging
@@ -282,7 +319,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
     // Exchange code for tokens (Google expects form-encoded data)
     const baseUrl = getBaseUrl(req);
     // Ensure no trailing slash and correct path
-    const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
+    const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    const redirectUri = `${cleanBaseUrl}/api/auth/google/callback`;
     const tokenData = {
       code,
       client_id: GOOGLE_CLIENT_ID,
