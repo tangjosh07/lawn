@@ -49,10 +49,6 @@ app.get('/', (req, res) => {
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
-// Auto-detect BASE_URL from Vercel or use environment variable
-const BASE_URL = process.env.BASE_URL || 
-                 (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001');
-
 // In-memory data storage (can be upgraded to database)
 const data = {
   users: [],
