@@ -136,8 +136,14 @@ function getBaseUrl(req) {
     return `${protocol}://${host}`;
   }
   
-  // Last resort: localhost (shouldn't happen in production)
-  console.warn('Warning: Could not determine base URL, using localhost fallback');
+  // Last resort: throw error in production, localhost only for local dev
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    console.error('ERROR: Could not determine base URL in production!');
+    console.error('Please set BASE_URL environment variable');
+    throw new Error('BASE_URL environment variable is required in production');
+  }
+  // Only allow localhost fallback in local development
+  console.warn('Warning: Could not determine base URL, using localhost fallback (local dev only)');
   return 'http://localhost:3001';
 }
 
