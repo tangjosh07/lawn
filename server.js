@@ -212,13 +212,7 @@ app.post('/api/login', async (req, res) => {
 
 // Helper function to get base URL from request
 function getBaseUrl(req) {
-  // Priority 1: Explicit BASE_URL env var (use as-is, don't modify)
-  if (process.env.BASE_URL) {
-    console.log('Using BASE_URL env var - Base URL:', process.env.BASE_URL);
-    return process.env.BASE_URL;
-  }
-  
-  // Priority 2: Request headers (most reliable in Vercel)
+  // Priority 1: Request headers (most reliable in Vercel)
   const protocol = req.headers['x-forwarded-proto'] || 
                    (req.secure ? 'https' : 'http') || 
                    'https';
@@ -229,14 +223,26 @@ function getBaseUrl(req) {
   if (host) {
     const url = `${protocol}://${host}`;
     console.log('Using request headers - Base URL:', url);
+    console.log('Headers:', JSON.stringify({
+      'x-forwarded-host': req.headers['x-forwarded-host'],
+      'host': req.headers.host,
+      'x-forwarded-proto': req.headers['x-forwarded-proto'],
+      ':authority': req.headers[':authority']
+    }));
     return url;
   }
   
-  // Priority 3: VERCEL_URL env var (Vercel provides this)
+  // Priority 2: VERCEL_URL env var (Vercel provides this)
   if (process.env.VERCEL_URL) {
     const url = `https://${process.env.VERCEL_URL}`;
     console.log('Using VERCEL_URL env var - Base URL:', url);
     return url;
+  }
+  
+  // Priority 3: Explicit BASE_URL env var (use as-is, don't modify)
+  if (process.env.BASE_URL) {
+    console.log('Using BASE_URL env var - Base URL:', process.env.BASE_URL);
+    return process.env.BASE_URL;
   }
   
   // Error in production - should never reach here
@@ -245,6 +251,7 @@ function getBaseUrl(req) {
       'x-forwarded-host': req.headers['x-forwarded-host'],
       'host': req.headers.host,
       'x-forwarded-proto': req.headers['x-forwarded-proto'],
+      ':authority': req.headers[':authority'],
       'BASE_URL': process.env.BASE_URL,
       'VERCEL_URL': process.env.VERCEL_URL
     });
