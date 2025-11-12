@@ -384,109 +384,66 @@ app.get('/api/auth/google/callback', async (req, res) => {
       }
     }
     
-    // Also check in-memory storage
-    if (!user) {
-      user = inMemoryUsers.find(u => u.googleId === googleId || u.email === normalizedEmail) || null;
+    // Check database connection first
+    if (!await ensureDB()) {
+      console.error('❌ Database not available for OAuth');
+      return res.redirect(`/?error=database_unavailable`);
     }
     
     if (!user) {
-      // Create new user - ALWAYS try database first
+      // Create new user in database
       console.log('Creating new user in database...');
-      if (await ensureDB()) {
-        try {
-          user = new User({
-            name: name || email.split('@')[0],
-            email: normalizedEmail,
-            googleId: googleId,
-            picture: picture,
-            userType: session.userType || 'homeowner',
-            authMethod: 'google'
-          });
-          await user.save();
-          console.log('✅ User saved to database:', user._id.toString());
-        } catch (error) {
-          console.error('❌ Error creating user in database:', error);
-          // If it's a duplicate key error, try to find the user
-          if (error.code === 11000) {
-            console.log('User already exists, finding by email...');
-            user = await User.findOne({ email: normalizedEmail });
-            if (!user) {
-              user = await User.findOne({ googleId });
-            }
-          }
-          
-          // If still no user, fall back to in-memory
-          if (!user) {
-            console.warn('⚠️ Falling back to in-memory user storage');
-            const userId = uuidv4();
-            user = {
-              id: userId,
-              name: name || email.split('@')[0],
-              email: normalizedEmail,
-              googleId: googleId,
-              picture: picture,
-              userType: session.userType || 'homeowner',
-              authMethod: 'google'
-            };
-            inMemoryUsers.push(user);
-          }
-        }
-      } else {
-        // Database not available - use in-memory storage
-        console.warn('⚠️ Database not available - using in-memory storage');
-        const userId = uuidv4();
-        user = {
-          id: userId,
+      try {
+        user = new User({
           name: name || email.split('@')[0],
           email: normalizedEmail,
           googleId: googleId,
           picture: picture,
           userType: session.userType || 'homeowner',
           authMethod: 'google'
-        };
-        inMemoryUsers.push(user);
+        });
+        await user.save();
+        console.log('✅ User saved to database:', user._id.toString());
+      } catch (error) {
+        console.error('❌ Error creating user in database:', error);
+        // If duplicate, find existing user
+        if (error.code === 11000) {
+          console.log('User already exists, finding by email...');
+          user = await User.findOne({ email: normalizedEmail });
+          if (!user) {
+            user = await User.findOne({ googleId });
+          }
+        }
+        if (!user) {
+          return res.redirect(`/?error=user_creation_failed`);
+        }
       }
     } else {
       // Update existing user with Google info if needed
-      if (await ensureDB() && user.save && typeof user.save === 'function') {
-        try {
-          if (!user.googleId) {
-            user.googleId = googleId;
-          }
-          if (picture && !user.picture) {
-            user.picture = picture;
-          }
-          user.authMethod = 'google';
-          await user.save();
-          console.log('✅ User updated in database');
-        } catch (error) {
-          console.error('Error updating user in database:', error);
-          // Continue anyway - user exists, just couldn't update
+      try {
+        if (!user.googleId) {
+          user.googleId = googleId;
         }
+        if (picture && !user.picture) {
+          user.picture = picture;
+        }
+        user.authMethod = 'google';
+        await user.save();
+        console.log('✅ User updated in database');
+      } catch (error) {
+        console.error('Error updating user in database:', error);
       }
     }
     
     // Convert Mongoose document to plain object for response
-    let userResponse = user;
-    if (user._id && typeof user._id.toString === 'function') {
-      userResponse = {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-        googleId: user.googleId,
-        picture: user.picture,
-        userType: user.userType
-      };
-    } else if (!user.id && user._id) {
-      userResponse = {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-        googleId: user.googleId,
-        picture: user.picture,
-        userType: user.userType
-      };
-    }
+    const userResponse = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      googleId: user.googleId,
+      picture: user.picture,
+      userType: user.userType
+    };
     user = userResponse;
     
     // Clean up session
