@@ -70,19 +70,31 @@ connectDB().catch(err => {
 
 // Helper function to ensure DB connection
 const ensureDB = async () => {
+  // If already connected, return true
   if (mongoose.connection.readyState === 1) {
     return true;
   }
-  if (process.env.MONGODB_URI) {
-    try {
-      await connectDB();
-      return mongoose.connection.readyState === 1;
-    } catch (error) {
-      console.error('Failed to connect to database:', error);
-      return false;
-    }
+  
+  // If no MONGODB_URI, return false (will use in-memory)
+  if (!process.env.MONGODB_URI) {
+    console.warn('MONGODB_URI not set - using in-memory storage');
+    return false;
   }
-  return false;
+  
+  // Try to connect
+  try {
+    await connectDB();
+    // Check if connection is ready
+    if (mongoose.connection.readyState === 1) {
+      return true;
+    }
+    // If still not ready, wait a bit and check again
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return mongoose.connection.readyState === 1;
+  } catch (error) {
+    console.error('Failed to connect to database:', error);
+    return false;
+  }
 };
 
 // Helper functions - use database or fallback to in-memory
@@ -374,25 +386,44 @@ app.get('/api/auth/google/callback', async (req, res) => {
     
     if (!user) {
       // Create new user
-      user = new User({
-        name: name || email.split('@')[0],
-        email: normalizedEmail,
-        googleId: googleId,
-        picture: picture,
-        userType: session.userType || 'homeowner',
-        authMethod: 'google'
-      });
-      await user.save();
+      if (await ensureDB()) {
+        try {
+          user = new User({
+            name: name || email.split('@')[0],
+            email: normalizedEmail,
+            googleId: googleId,
+            picture: picture,
+            userType: session.userType || 'homeowner',
+            authMethod: 'google'
+          });
+          await user.save();
+        } catch (error) {
+          console.error('Error creating user in database:', error);
+          // If DB save fails, we can't proceed - return error
+          return res.redirect(`/?error=database_error`);
+        }
+      } else {
+        // Database not available - can't create user
+        console.error('Database not available - cannot create user');
+        return res.redirect(`/?error=database_unavailable`);
+      }
     } else {
       // Update existing user with Google info if needed
-      if (!user.googleId) {
-        user.googleId = googleId;
+      if (await ensureDB()) {
+        try {
+          if (!user.googleId) {
+            user.googleId = googleId;
+          }
+          if (picture && !user.picture) {
+            user.picture = picture;
+          }
+          user.authMethod = 'google';
+          await user.save();
+        } catch (error) {
+          console.error('Error updating user in database:', error);
+          // Continue anyway - user exists, just couldn't update
+        }
       }
-      if (picture && !user.picture) {
-        user.picture = picture;
-      }
-      user.authMethod = 'google';
-      await user.save();
     }
     
     // Clean up session

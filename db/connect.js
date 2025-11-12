@@ -29,9 +29,12 @@ async function connectDB() {
   // Start new connection
   try {
     const options = {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000, // Increased to 10 seconds
+      socketTimeoutMS: 45000, // 45 seconds
+      connectTimeoutMS: 10000, // 10 seconds
       bufferCommands: false,
       bufferMaxEntries: 0,
+      maxPoolSize: 10,
     };
 
     cached.promise = mongoose.connect(MONGODB_URI, options).then((mongoose) => {
@@ -39,6 +42,10 @@ async function connectDB() {
       cached.conn = mongoose;
       cached.promise = null;
       return mongoose;
+    }).catch((error) => {
+      console.error('MongoDB connection promise rejected:', error);
+      cached.promise = null;
+      throw error;
     });
 
     const conn = await cached.promise;
