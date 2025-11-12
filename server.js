@@ -118,8 +118,13 @@ app.get('/api/auth/google', (req, res) => {
   
   const state = uuidv4();
   const baseUrl = getBaseUrl(req);
-  const redirectUri = `${baseUrl}/api/auth/google/callback`;
+  // Ensure no trailing slash and correct path
+  const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
   const scope = 'openid email profile';
+  
+  // Log for debugging (remove in production if needed)
+  console.log('OAuth redirect URI:', redirectUri);
+  console.log('Base URL:', baseUrl);
   
   // Store state for verification
   data.sessions[state] = {
@@ -163,13 +168,18 @@ app.get('/api/auth/google/callback', async (req, res) => {
   try {
     // Exchange code for tokens (Google expects form-encoded data)
     const baseUrl = getBaseUrl(req);
+    // Ensure no trailing slash and correct path
+    const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
     const tokenData = {
       code,
       client_id: GOOGLE_CLIENT_ID,
       client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: `${baseUrl}/api/auth/google/callback`,
+      redirect_uri: redirectUri,
       grant_type: 'authorization_code'
     };
+    
+    // Log for debugging
+    console.log('Callback redirect URI:', redirectUri);
     
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', 
       new URLSearchParams(tokenData).toString(), 
