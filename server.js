@@ -699,20 +699,50 @@ if (io) {
       socket.join(`user-${userId}`);
     });
     
-    socket.on('send-message', (messageData) => {
-      const message = {
-        id: uuidv4(),
-        fromId: messageData.fromId,
-        toId: messageData.toId,
-        content: messageData.content,
-        createdAt: new Date().toISOString()
-      };
-      
-      data.messages.push(message);
-      
-      // Send to both users
-      io.to(`user-${messageData.toId}`).emit('receive-message', message);
-      io.to(`user-${messageData.fromId}`).emit('receive-message', message);
+    socket.on('send-message', async (messageData) => {
+      try {
+        // Save message to database
+        let message;
+        if (mongoose.connection.readyState === 1) {
+          message = new Message({
+            fromId: messageData.fromId,
+            toId: messageData.toId,
+            content: messageData.content,
+            offerId: messageData.offerId || null
+          });
+          await message.save();
+          await message.populate('fromId', 'name email picture');
+          await message.populate('toId', 'name email picture');
+          
+          // Transform for socket emission
+          const messageObj = {
+            id: message._id.toString(),
+            fromId: message.fromId._id.toString(),
+            toId: message.toId._id.toString(),
+            content: message.content,
+            offerId: message.offerId ? message.offerId.toString() : null,
+            createdAt: message.createdAt
+          };
+          
+          // Send to both users
+          io.to(`user-${messageData.toId}`).emit('receive-message', messageObj);
+          io.to(`user-${messageData.fromId}`).emit('receive-message', messageObj);
+        } else {
+          // Fallback to in-memory if DB not available
+          const messageObj = {
+            id: uuidv4(),
+            fromId: messageData.fromId,
+            toId: messageData.toId,
+            content: messageData.content,
+            createdAt: new Date().toISOString()
+          };
+          io.to(`user-${messageData.toId}`).emit('receive-message', messageObj);
+          io.to(`user-${messageData.fromId}`).emit('receive-message', messageObj);
+        }
+      } catch (error) {
+        console.error('Error sending message:', error);
+        socket.emit('message-error', { error: 'Failed to send message' });
+      }
     });
     
     socket.on('disconnect', () => {
