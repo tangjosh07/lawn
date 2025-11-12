@@ -62,9 +62,6 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 // OAuth sessions (temporary, in-memory is fine)
 const sessions = {};
 
-// In-memory user storage (fallback when DB not available)
-const inMemoryUsers = [];
-
 // Initialize database connection (async, but don't block)
 // Connection will be established on first use
 connectDB().catch(err => {
@@ -100,20 +97,17 @@ const ensureDB = async () => {
   }
 };
 
-// Helper functions - use database or fallback to in-memory
+// Helper functions - use database only
 const findUser = async (userId) => {
-  // First try database
   if (await ensureDB()) {
     try {
-      const user = await User.findById(userId);
-      if (user) return user;
+      return await User.findById(userId);
     } catch (error) {
       console.error('Error finding user in database:', error);
+      return null;
     }
   }
-  
-  // Fallback to in-memory storage
-  return inMemoryUsers.find(u => u.id === userId || u._id?.toString() === userId) || null;
+  return null;
 };
 
 const findUserByEmail = async (email) => {
@@ -122,12 +116,10 @@ const findUserByEmail = async (email) => {
       return await User.findOne({ email: email.toLowerCase().trim() });
     } catch (error) {
       console.error('Error finding user by email:', error);
-      // Fall back to in-memory
+      return null;
     }
   }
-  // Fallback to in-memory storage
-  const normalizedEmail = email.toLowerCase().trim();
-  return inMemoryUsers.find(u => u.email === normalizedEmail) || null;
+  return null;
 };
 
 const findGroup = async (groupId) => {
@@ -528,8 +520,8 @@ app.get('/api/auth/verify', async (req, res) => {
       return res.status(401).json({ error: 'Invalid token' });
     }
     
-    // Handle both database and in-memory users
-    const userId = user._id ? user._id.toString() : (user.id || decoded.userId);
+    // Get user ID from database user
+    const userId = user._id ? user._id.toString() : decoded.userId;
     
     res.json({ 
       user: { 
@@ -594,78 +586,42 @@ app.post('/api/groups', async (req, res) => {
       return res.status(400).json({ error: 'ZIP code is required' });
     }
     
-    // Verify creator exists - check both database and in-memory
-    let creator = await findUser(creatorId);
+    // Check database connection first
+    if (!await ensureDB()) {
+      console.error('❌ Database not available');
+      return res.status(503).json({ error: 'Database unavailable. Please check MONGODB_URI environment variable.' });
+    }
+    
+    // Verify creator exists in database
+    let creator = await User.findById(creatorId);
     
     if (!creator) {
-      console.error('Creator not found for ID:', creatorId);
-      console.log('Available users in memory:', inMemoryUsers.length);
+      // Try finding by email or other fields
+      console.log('Creator not found by ID, trying alternative lookup...');
       return res.status(404).json({ error: 'Creator not found. Please sign in again.' });
     }
     
-    // If creator is in-memory, we need to save them to database first
-    if (!creator._id && creator.id) {
-      console.log('Creator is in-memory, saving to database first...');
-      if (await ensureDB()) {
-        try {
-          const dbUser = new User({
-            name: creator.name,
-            email: creator.email,
-            googleId: creator.googleId,
-            picture: creator.picture,
-            userType: creator.userType || 'homeowner',
-            authMethod: creator.authMethod || 'google'
-          });
-          await dbUser.save();
-          creator = dbUser;
-          console.log('✅ Creator saved to database:', creator._id.toString());
-        } catch (error) {
-          console.error('Error saving creator to database:', error);
-          // If duplicate, find existing user
-          if (error.code === 11000) {
-            creator = await User.findOne({ email: creator.email }) || 
-                     await User.findOne({ googleId: creator.googleId });
-          }
-          if (!creator || !creator._id) {
-            return res.status(500).json({ error: 'Failed to save creator to database' });
-          }
-        }
-      } else {
-        return res.status(503).json({ error: 'Database unavailable. Cannot create group without database.' });
-      }
-    }
-    
-    // Ensure we have a MongoDB ObjectId for the creator
-    const creatorObjectId = creator._id || creator.id;
-    if (!creatorObjectId) {
-      return res.status(500).json({ error: 'Invalid creator ID' });
-    }
-    
     // Create group in database
-    if (await ensureDB()) {
-      const group = new Group({
-        name,
-        address: address || '',
-        zip: groupZip,
-        createdBy: creatorObjectId,
-        members: [creatorObjectId] // Creator is first member
-      });
-      
-      await group.save();
-      await group.populate('members', 'name email picture');
-      await group.populate('createdBy', 'name email');
-      
-      res.json({
-        id: group._id.toString(),
-        name: group.name,
-        zip: group.zip,
-        address: group.address,
-        members: group.members ? group.members.length : 1,
-        memberDetails: group.members || []
-      });
-    } else {
-      return res.status(503).json({ error: 'Database unavailable. Cannot create group without database.' });
-    }
+    const group = new Group({
+      name,
+      address: address || '',
+      zip: groupZip,
+      createdBy: creator._id,
+      members: [creator._id] // Creator is first member
+    });
+    
+    await group.save();
+    await group.populate('members', 'name email picture');
+    await group.populate('createdBy', 'name email');
+    
+    res.json({
+      id: group._id.toString(),
+      name: group.name,
+      zip: group.zip,
+      address: group.address,
+      members: group.members ? group.members.length : 1,
+      memberDetails: group.members || []
+    });
   } catch (error) {
     console.error('Error creating group:', error);
     res.status(500).json({ error: 'Failed to create group: ' + error.message });
